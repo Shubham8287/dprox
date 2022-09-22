@@ -1,80 +1,109 @@
-use std::io::{Read, Write};
-use std::net::UdpSocket;
-use tun::platform::Device;
+use tokio::net::UdpSocket;
+use std::net::Ipv4Addr;
 use log;
 mod cli;
 use env_logger;
-
-extern crate tun;
-
-fn create_tun(addr: String) -> Device {
-	let mut config = tun::Configuration::default();
-	config.address(addr)
-	       .netmask((255, 255, 255, 0))
-	       .up();
-
-	#[cfg(target_os = "linux")]
-	config.platform(|config| {
-		config.packet_information(true);
-	});
-
-	tun::create(&config).unwrap()
-}
-
+use tokio::io::{AsyncWriteExt, AsyncReadExt};
+use tokio_tun::TunBuilder;
 
 async fn conn (remote_addr: String, port: u16) {
     log::info!("Starting as client");
-    let mut tun = create_tun("10.0.0.5".to_string());
-    let socket = UdpSocket::bind(String::from("127.0.0.1:8080")).unwrap();
-    let mut buf1 = [0u8; 2048];
-    let mut buf2 = [0u8; 2048];
+    let tun = TunBuilder::new()
+    .name("")
+    .address(Ipv4Addr::new(10,0,0,5))         // if name is empty, then it is set by kernel.
+    .tap(false)   // false (default): TUN, true: TAP.
+    .packet_info(false)  // false: IFF_NO_PI, default is true.
+    .up()                // or set it up manually using `sudo ip link set <tun-name> up`.
+    .try_build();
+
+    let tun = match tun {
+        Ok(tun) => tun,
+        Err(_err) => { panic!("yo") }
+    };
+    let (mut reader, mut writer) = tokio::io::split(tun);
+    let socket = UdpSocket::bind("0.0.0.0:8080").await;
+    let socket = match socket {
+        Ok(socket) => socket,
+        Err(_err) => { panic!("yo") }
+    };
+    let mut buf1 = [0u8; 512];
+    let mut buf2 = [0u8; 512];
     let raddr = remote_addr + ":" + &port.to_string();
     loop {
         tokio::select! {
             _ = async {
                 log::debug!("reading from server");
-                socket.recv_from(&mut buf2).unwrap();
+                socket.recv_from(&mut buf2).await;
+                log::debug!("server -{:?}", buf2);
             } => {
                     log::debug!("writting to interface");
-                    tun.write(&mut buf2).unwrap()
+                    writer.write(&mut buf2).await;
             },
             _ = async {
                 log::debug!("reading from interface");
-                tun.read(&mut buf1).unwrap();
+                reader.read(&mut buf1).await;
+                log::debug!("interface -{:?}", buf1);
             } => {
                     log::debug!("sending to server {}", &raddr);
-                    socket.send_to(&buf1, &raddr).unwrap()
+                    socket.send_to(&buf1, &raddr).await;
             } 
         };
     }
 }
 
-async fn serv (port: &u16) {
+async fn serv (port: &u16)  {
     log::info!("Starting as server");
-    let mut tun = create_tun("10.1.0.6".to_string());
-    let socket = UdpSocket::bind(String::from("127.0.0.1:") + &port.to_string()).unwrap();
-    let mut buf1 = [0u8; 2048];
-    let mut buf2 = [0u8; 2048];
+    let tun = TunBuilder::new()
+    .name("")
+    .address(Ipv4Addr::new(10,1,0,6))         // if name is empty, then it is set by kernel.
+    .tap(false)   // false (default): TUN, true: TAP.
+    .packet_info(false)  // false: IFF_NO_PI, default is true.
+    .up()                // or set it up manually using `sudo ip link set <tun-name> up`.
+    .try_build();
+
+    let tun = match tun {
+        Ok(tun) => tun,
+        Err(_err) => { panic!("yo") }
+    };
+
+    let (mut reader, mut writer) = tokio::io::split(tun);
+
+    let socket = UdpSocket::bind(String::from("0.0.0.0:") + &port.to_string()).await;
+    let socket = match socket {
+        Ok(socket) => socket,
+        Err(_err) => { panic!("yo") }
+    };
+    let mut buf2 = [0u8; 512];
+    let mut buf1 = [0u8; 512];
     let mut caddr: String = "null".to_string();
     loop {
         tokio::select! {
             _ = async {
                 log::debug!("reading from interface");
-                tun.read(&mut buf1).unwrap();
+                reader.read(&mut buf1).await;
+                log::debug!("interface - {:?}", buf1);
             } => {
                     log::debug!("sending to client without addr");
                     if caddr != String::from("null") {
                         log::debug!("sending to client {}", &caddr);
-                        socket.send_to(&buf1, &caddr).unwrap(); 
+                        socket.send_to(&buf1, &caddr).await; 
                     }        
                 },
             _ = async {
                 log::debug!("reading from client");
-                let (_amt, addr) = socket.recv_from(&mut buf2).unwrap();
-                caddr = addr.to_string();
+                let tup = socket.recv_from(&mut buf2).await;
+                log::debug!("client - {:?}", buf2);
+                match tup {
+                    Ok((_amt, addr)) => {
+                        caddr = addr.to_string();
+                    }
+                    Err(err) => {
+                        log::error!("reading from client failed with error {}", err.to_string());
+                    }
+                }
             } => {
                     log::debug!("writting to interface");
-                    tun.write(&mut buf2).unwrap();
+                    writer.write(&mut buf2).await;
             }
         };
     }
