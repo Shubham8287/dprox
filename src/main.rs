@@ -113,8 +113,7 @@ async fn serv (port: &u16)  {
     let node = Turn::new("turn");
     let (mut reader, mut writer) = tokio::io::split(node.me.tun.unwrap());
 
-    let socket = UdpSocket::bind(String::from("0.0.0.0:") + &port.to_string()).await;
-    let socket = UdpSocket::bind("0.0.0.0:8080").await.expect("unbale to create socket");
+    let socket = UdpSocket::bind(String::from("0.0.0.0:") + &port.to_string()).await.expect("unable to create socket");
     let mut buf1 = [0u8; 1500];
     let mut buf2 = [0u8; 1500];
     let mut caddr: String = "null".to_string();
