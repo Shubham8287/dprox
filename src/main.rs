@@ -125,7 +125,7 @@ async fn serv (port: &u16)  {
                 reader.read(&mut buf1).await.expect("error reading to interface")
             } => {
                     log::debug!("sending to client without addr");
-                    let client_node_id = buf1[20]; // last octet of sender
+                    let client_node_id = buf1[19]; // last octet of sender
                     if node.nodes.contains_key(&client_node_id) {
                         let caddr = &node.nodes[&client_node_id];
                         log::info!("inteface -> address {} ", &caddr);
