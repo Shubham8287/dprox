@@ -84,7 +84,9 @@ async fn conn (turn_addr: String, port: u16) {
     let node = PeerNode::new(Ipv4Addr::new(a,b,c,d), port);
 
     let (mut reader, mut writer) = tokio::io::split(node.me.tun.unwrap());
-    let socket = UdpSocket::bind("0.0.0.0:8080").await.expect("unbale to create socket");
+    let mut rng = rand::thread_rng();
+    let localport = rng.gen_range(8000..9000);
+    let socket = UdpSocket::bind(format!("0.0.0.0:{}", localport)).await.expect("unbale to create socket");
     let mut buf1 = [0u8; 1500];
     let mut buf2 = [0u8; 1500];
     let raddr = turn_addr + ":" + &port.to_string();
@@ -124,8 +126,7 @@ async fn serv (port: &u16)  {
             len = async {
                 reader.read(&mut buf1).await.expect("error reading to interface")
             } => {
-                    log::debug!("sending to client without addr");
-                    let client_node_id = buf1[19]; // last octet of sender
+                    let client_node_id = buf1[19]; // last octet of receiver
                     if node.nodes.contains_key(&client_node_id) {
                         let caddr = &node.nodes[&client_node_id];
                         log::info!("inteface -> address {} ", &caddr);
@@ -140,7 +141,7 @@ async fn serv (port: &u16)  {
                 log::info!("source {:?} -> interface", &sock_addr);
                 log::debug!("source {} -> interface: data {:?}", &sock_addr, &buf2[..len]);
                 writer.write(&mut buf2[0..len]).await.expect("error writting to interface");
-                let id = buf2[15];
+                let id = buf2[15]; // last octet of sender
                 node.nodes.insert(id, sock_addr.to_string());
             }
         };
