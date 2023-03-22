@@ -129,15 +129,9 @@ async fn serv (port: &u16)  {
     log::info!("Starting as server node");
 
     let mut node = Turn::new();
-    let mut reader: tokio::io::ReadHalf<&mut Tun>;
-    let mut writer: tokio::io::WriteHalf<&mut Tun>;
     let node_ref = &mut (node.nodes);
     let tun = (node.me.tun).as_mut().unwrap();
-    {
-        let ( r, w) = tokio::io::split(tun);
-        reader = r;
-        writer = w;
-    }
+    let (mut reader,mut writer) = tokio::io::split(tun);
     let socket = UdpSocket::bind(String::from("0.0.0.0:") + &port.to_string()).await.expect("unable to create socket");
     let mut buf1 = [0u8; 1500];
     let mut buf2 = [0u8; 1500];
