@@ -1,5 +1,5 @@
-use tokio::net::{UdpSocket, tcp::ReadHalf};
-use std::{net::{Ipv4Addr, SocketAddr, IpAddr}, u16, fmt::format, str::from_utf8, error::Error, ptr::null};
+use tokio::net::{UdpSocket};
+use std::{net::{Ipv4Addr}, u16, str::from_utf8};
 use log;
 mod cli;
 use env_logger;
@@ -8,7 +8,7 @@ use tokio_tun::{TunBuilder, Tun};
 use rand::Rng;
 use std::collections::HashMap;
 use serde::ser::{Serialize, SerializeStruct, Serializer};
-use serde_json;
+
 struct Node {
     id: u8,
     tun: Option<Tun>
@@ -64,7 +64,9 @@ impl Turn {
     fn new() -> Self {
         let ip = Ipv4Addr::new(10,0,0,5);
         let node = Node::new(5, ip);
-        Turn {me: node, nodes: HashMap::new()}
+        let mut node_map: HashMap<u8, String> = HashMap::new();
+        node_map.insert(5, ip.to_string());
+        Turn {me: node, nodes: node_map}
     }
 
     fn add_node( &mut self, id: u8, node_addr: &String) {
@@ -129,7 +131,7 @@ async fn serv (port: &u16)  {
     log::info!("Starting as server node");
 
     let mut node = Turn::new();
-    let node_ref = &mut (node.nodes);
+    let map_ref = &mut (node.nodes);
     let tun = (node.me.tun).as_mut().unwrap();
     let (mut reader,mut writer) = tokio::io::split(tun);
     let socket = UdpSocket::bind(String::from("0.0.0.0:") + &port.to_string()).await.expect("unable to create socket");
@@ -142,13 +144,12 @@ async fn serv (port: &u16)  {
                 reader.read(&mut buf1).await.expect("error reading to interface")
             } => {
                     let client_node_id = buf1[19]; // last octet of receiver
-                    if node_ref.contains_key(&client_node_id) {
-                        let caddr = &node_ref[&client_node_id];
+                    if map_ref.contains_key(&client_node_id) {
+                        let caddr = &map_ref[&client_node_id];
                         log::info!("inteface -> address {} ", &caddr);
                         log::debug!("inteface -> address {}: data {:?}", &caddr, &buf1[..len]);
                         socket.send_to(&buf1[0..len], &caddr).await.expect("error  sending to socket");
                     }
-
                 },
             (len, sock_addr) = async {
                 socket.recv_from(&mut buf2).await.expect("error receving from socket")
@@ -156,12 +157,13 @@ async fn serv (port: &u16)  {
                 log::info!("source {:?} -> interface", &sock_addr);
                 log::debug!("source {} -> interface: data {:?}", &sock_addr, &buf2[..len]);
                 if buf2[0] == 1 {
-                    println!("{:?}", &node_ref);
-                    socket.send_to(&(serde_json::to_string(node_ref).unwrap().as_bytes()), &sock_addr).await.expect("error sending to socket");
+                    socket.send_to(format!("{:?}",map_ref).as_bytes(), &sock_addr).await.expect("error sending to socket");
                 } else {
                 writer.write(&mut buf2[0..len]).await.expect("error writting to interface");
                 let id = buf2[15]; // last octet of sender
-                node_ref.insert(id, sock_addr.to_string());
+                if id != 0 {
+                    map_ref.insert(id, sock_addr.to_string());
+                    }
                 }
             }
         };
@@ -172,15 +174,14 @@ async fn get_info (turn_addr: String, port: u16) {
     log::info!("fetching network details");
     let socket = UdpSocket::bind("0.0.0.0:9090").await.expect("unbale to create socket");
     socket.connect(format!("{}:{}", turn_addr, port)).await.expect("failed to connect to server");
-    const len:usize = 1200;
-    let mut buf = [0u8; len];
+    let mut buf = [0u8; 1200];
     buf[0] = 1;
-    let _len = socket.send(&buf[..len]).await.expect("unable to send get info request");
+    let _len = socket.send(&buf).await.expect("unable to send get info request");
     log::info!("fetching network details");
     // recv from remote_addr
-    socket.recv(&mut buf).await.expect("failed while receving data");
+    let _len = socket.recv(&mut buf).await.expect("failed while receving data");
     log::info!("fetching network details");
-    println!("{:?}", from_utf8(&buf).unwrap());
+    println!("{:?}", from_utf8(&buf[.._len]).unwrap());
     drop(socket);
     // send to remote_addr
 }
