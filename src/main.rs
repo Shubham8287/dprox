@@ -1,5 +1,5 @@
-use tokio::net::UdpSocket;
-use std::{net::{Ipv4Addr, SocketAddr, IpAddr}, u16};
+use tokio::net::{UdpSocket, tcp::ReadHalf};
+use std::{net::{Ipv4Addr, SocketAddr, IpAddr}, u16, fmt::format, str::from_utf8, error::Error, ptr::null};
 use log;
 mod cli;
 use env_logger;
@@ -7,7 +7,8 @@ use tokio::io::{AsyncWriteExt, AsyncReadExt};
 use tokio_tun::{TunBuilder, Tun};
 use rand::Rng;
 use std::collections::HashMap;
-
+use serde::ser::{Serialize, SerializeStruct, Serializer};
+use serde_json;
 struct Node {
     id: u8,
     tun: Option<Tun>
@@ -71,6 +72,19 @@ impl Turn {
     }
 }
 
+impl Serialize for Turn {
+    fn serialize<S>(&self, serializer: S) ->  Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("Turn", 2)?;
+        state.serialize_field("me", &self.me.id)?;
+        state.serialize_field("nodes", &self.nodes)?;
+        
+        state.end()
+    }
+}
+
 
 async fn conn (turn_addr: String, port: u16) {
     log::info!("Starting as peer node");
@@ -81,9 +95,9 @@ async fn conn (turn_addr: String, port: u16) {
         .try_into()
         .unwrap();
 
-    let node = PeerNode::new(Ipv4Addr::new(a,b,c,d), port);
-
-    let (mut reader, mut writer) = tokio::io::split(node.me.tun.unwrap());
+    let mut node = PeerNode::new(Ipv4Addr::new(a,b,c,d), port);
+    let tun = node.me.tun.as_mut();
+    let (mut reader, mut writer) = tokio::io::split(tun.unwrap());
     let mut rng = rand::thread_rng();
     let localport = rng.gen_range(8000..9000);
     let socket = UdpSocket::bind(format!("0.0.0.0:{}", localport)).await.expect("unbale to create socket");
@@ -115,8 +129,15 @@ async fn serv (port: &u16)  {
     log::info!("Starting as server node");
 
     let mut node = Turn::new();
-    let (mut reader, mut writer) = tokio::io::split(node.me.tun.unwrap());
-
+    let mut reader: tokio::io::ReadHalf<&mut Tun>;
+    let mut writer: tokio::io::WriteHalf<&mut Tun>;
+    let node_ref = &mut (node.nodes);
+    let tun = (node.me.tun).as_mut().unwrap();
+    {
+        let ( r, w) = tokio::io::split(tun);
+        reader = r;
+        writer = w;
+    }
     let socket = UdpSocket::bind(String::from("0.0.0.0:") + &port.to_string()).await.expect("unable to create socket");
     let mut buf1 = [0u8; 1500];
     let mut buf2 = [0u8; 1500];
@@ -127,8 +148,8 @@ async fn serv (port: &u16)  {
                 reader.read(&mut buf1).await.expect("error reading to interface")
             } => {
                     let client_node_id = buf1[19]; // last octet of receiver
-                    if node.nodes.contains_key(&client_node_id) {
-                        let caddr = &node.nodes[&client_node_id];
+                    if node_ref.contains_key(&client_node_id) {
+                        let caddr = &node_ref[&client_node_id];
                         log::info!("inteface -> address {} ", &caddr);
                         log::debug!("inteface -> address {}: data {:?}", &caddr, &buf1[..len]);
                         socket.send_to(&buf1[0..len], &caddr).await.expect("error  sending to socket");
@@ -140,12 +161,34 @@ async fn serv (port: &u16)  {
             } => {
                 log::info!("source {:?} -> interface", &sock_addr);
                 log::debug!("source {} -> interface: data {:?}", &sock_addr, &buf2[..len]);
+                if buf2[0] == 1 {
+                    println!("{:?}", &node_ref);
+                    socket.send_to(&(serde_json::to_string(node_ref).unwrap().as_bytes()), &sock_addr).await.expect("error sending to socket");
+                } else {
                 writer.write(&mut buf2[0..len]).await.expect("error writting to interface");
                 let id = buf2[15]; // last octet of sender
-                node.nodes.insert(id, sock_addr.to_string());
+                node_ref.insert(id, sock_addr.to_string());
+                }
             }
         };
     }
+}
+
+async fn get_info (turn_addr: String, port: u16) {
+    log::info!("fetching network details");
+    let socket = UdpSocket::bind("0.0.0.0:9090").await.expect("unbale to create socket");
+    socket.connect(format!("{}:{}", turn_addr, port)).await.expect("failed to connect to server");
+    const len:usize = 1200;
+    let mut buf = [0u8; len];
+    buf[0] = 1;
+    let _len = socket.send(&buf[..len]).await.expect("unable to send get info request");
+    log::info!("fetching network details");
+    // recv from remote_addr
+    socket.recv(&mut buf).await.expect("failed while receving data");
+    log::info!("fetching network details");
+    println!("{:?}", from_utf8(&buf).unwrap());
+    drop(socket);
+    // send to remote_addr
 }
 
 #[tokio::main]
@@ -154,5 +197,6 @@ async fn main() {
     match cli::get_args().unwrap() {
         cli::Args::Client(client) => conn(client.remote_addr, client.port).await,
         cli::Args::Server(server) => serv(&server.port).await,
+        cli::Args::Info(client) => get_info(client.remote_addr, client.port).await,
     }
 }

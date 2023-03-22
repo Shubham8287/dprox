@@ -14,6 +14,7 @@ pub struct Client {
 
 #[derive(Debug, Clone)]
 pub enum Args {
+    Info(Client),
     Client(Client),
     Server(Server),
 }
@@ -23,7 +24,7 @@ pub fn get_args() -> Result<Args, String> {
         .version("1.0")
         .subcommand(
             SubCommand::with_name("server")
-                .help("client mode")
+                .help("server mode")
                 .arg(
                     Arg::with_name("bind")
                         .short("l")
@@ -43,7 +44,25 @@ pub fn get_args() -> Result<Args, String> {
         )
         .subcommand(
             SubCommand::with_name("client")
-                .help("server mode")
+                .help("client mode")
+                .arg(
+                    Arg::with_name("server")
+                        .short("s")
+                        .long("server")
+                        .help("set the remote server address")
+                        .takes_value(true),
+                )
+                .arg(
+                    Arg::with_name("port")
+                        .short("p")
+                        .long("port")
+                        .help("set the remote port")
+                        .takes_value(true),
+                )
+        )
+        .subcommand(
+            SubCommand::with_name("info")
+                .help("get info")
                 .arg(
                     Arg::with_name("server")
                         .short("s")
@@ -83,7 +102,22 @@ pub fn get_args() -> Result<Args, String> {
         Ok(Args::Server(Server {
             port: port,
         }))
-    } else {
+    } else if let Some(matches) =  matches.subcommand_matches("info") {
+        let ip_str = matches
+        .value_of("server")
+        .ok_or_else(|| "can not find client host value")
+        .unwrap();
+        let port_str = matches
+            .value_of("port")
+            .ok_or_else(|| "can not find client port value")
+            .unwrap();
+        let port = port_str.parse::<u16>().map_err(|e| e.to_string())?;
+        Ok(Args::Info(Client {
+            remote_addr: ip_str.to_string(),
+            port: port,
+        }))
+    } 
+    else {
         unimplemented!()
     }
 }
