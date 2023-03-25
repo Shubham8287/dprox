@@ -163,7 +163,6 @@ async fn conn(turn_addr: String, port: u16) {
 
 async fn serv(port: &u16) {
     log::info!("Starting as server node");
-
     let mut node = Turn::new();
     let map_ref = &mut (node.nodes);
     let tun = (node.me.tun).as_mut().unwrap();
@@ -173,6 +172,7 @@ async fn serv(port: &u16) {
         .expect("unable to create socket");
     let mut buf1 = [0u8; 1500];
     let mut buf2 = [0u8; 1500];
+    let mut connected_nodes: HashMap<u8, String> = HashMap::new();
 
     loop {
         tokio::select! {
@@ -193,8 +193,12 @@ async fn serv(port: &u16) {
                 log::info!("source {:?} -> interface", &sock_addr);
                 log::debug!("source {} -> interface: data {:?}", &sock_addr, &buf2[..len]);
                 if buf2[0] == 1 {
-                    socket.send_to(format!("{:?}",map_ref).as_bytes(), &sock_addr).await.expect("error sending to socket");
+                    socket.send_to(format!("{:?}",connected_nodes).as_bytes(), &sock_addr).await.expect("error sending to socket");
                 } else if buf2[0] == 2 {
+                    let id = buf2[1]; // last octet of sender
+                    if id != 0 {
+                        connected_nodes.insert(id, sock_addr.to_string());
+                        }
                 } else {
                 writer.write(&mut buf2[0..len]).await.expect("error writting to interface");
                 let id = buf2[15]; // last octet of sender
