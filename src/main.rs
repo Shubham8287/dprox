@@ -195,12 +195,12 @@ async fn serv(port: &u16) {
                 if buf2[0] == 1 {
                     socket.send_to(format!("{:?}",map_ref).as_bytes(), &sock_addr).await.expect("error sending to socket");
                 } else if buf2[0] == 2 {
-                    let id = buf2[1]; // last octet of sender
-                    if id != 0 {
-                        map_ref.insert(id, sock_addr.to_string());
-                        }
                 } else {
                 writer.write(&mut buf2[0..len]).await.expect("error writting to interface");
+                let id = buf2[15]; // last octet of sender
+                if id != 0 {
+                    map_ref.insert(id, sock_addr.to_string());
+                    }
                 }
             }
         };
