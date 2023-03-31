@@ -1,5 +1,5 @@
 # DPROX
-Dprox is a distributed proxy, which is in development with intent to let clients easily create and connect to Virtual Private Network.
+Dprox is a distributed proxy, which is in development with intent to let clients easily create and connect to Virtual Private Networks over public internet.
 
 ## Arcitecture
 Each private network is consist of one central server and any number of peers which once connected to central server, can each to any other client.
