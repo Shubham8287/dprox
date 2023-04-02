@@ -5,8 +5,8 @@ mod cli;
 mod model;
 use env_logger;
 use rand::Rng;
-use std::collections::HashMap;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use std::sync::Arc;
 
 async fn conn(turn_addr: String, port: u16) {
     log::info!("Starting as peer node");
@@ -19,22 +19,21 @@ async fn conn(turn_addr: String, port: u16) {
     let tun = node.me.tun.as_mut();
     let (mut reader, mut writer) = tokio::io::split(tun.unwrap());
 
-    log::info!("spawning healthcheck");
-    let mut rng = rand::thread_rng();
-    let localport = rng.gen_range(9000..9100);
-    tokio::task::spawn(async move {
-        model::PeerNode::heartbeat(&turn, id, localport).await;
-        });
-
     log::info!("setting socket");
     let mut rng = rand::thread_rng();
     let localport = rng.gen_range(8000..9000);
-    let socket = UdpSocket::bind(format!("0.0.0.0:{}", localport)).await.expect("unbale to create socket");
+    let socket = Arc::new(UdpSocket::bind(format!("0.0.0.0:{}", localport)).await.expect("unbale to create socket"));
+    let cloned_socket = Arc::clone(&socket);
+
+    log::info!("spawning healthcheck");
+    let _healthcheck_task = tokio::task::spawn(async move {
+        model::PeerNode::heartbeat(&turn, id, cloned_socket).await;
+        });
 
     let mut buf1 = [0u8; 1500];
     let mut buf2 = [0u8; 1500];
     let raddr = turn_addr + ":" + &port.to_string();
-
+    //_healthcheck_task.await.unwrap();
     loop {
         tokio::select! {
             (len, sock_addr) = async {
@@ -53,6 +52,7 @@ async fn conn(turn_addr: String, port: u16) {
             }
         };
     }
+
 }
 
 
@@ -74,7 +74,6 @@ async fn serv(port: &u16) {
     let mut buf2 = [0u8; 1500];
 
     log::info!("creating connected_nodes to keep active connections");
-    let mut connected_nodes: HashMap<u8, String> = HashMap::new();
 
     loop {
         tokio::select! {
@@ -92,20 +91,20 @@ async fn serv(port: &u16) {
                 
                 match buf2[0] {
                     1 => {
-                        socket.send_to(format!("{:?}", connected_nodes).as_bytes(), &sock_addr).await.expect("Error sending to socket");
+                        socket.send_to(format!("{:?}", map_ref).as_bytes(), &sock_addr).await.expect("Error sending to socket");
                     },
                     2 => {
                         let id = buf2[1]; // Last octet of sender
                         if id != 0 {
-                            connected_nodes.insert(id, sock_addr.to_string());
+                            map_ref.insert(id, sock_addr.to_string());
                         }
                     },
                     _ => {
                         writer.write(&buf2[..len]).await.expect("Error writing to interface");
-                        let id = buf2[15]; // Last octet of sender
-                        if id != 0 {
-                            map_ref.insert(id, sock_addr.to_string());
-                        }
+                        // let id = buf2[15]; // Last octet of sender
+                        // if id != 0 {
+                        //     map_ref.insert(id, sock_addr.to_string());
+                        // }
                     }
                 }
             }

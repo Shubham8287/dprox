@@ -7,6 +7,7 @@ use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std::collections::HashMap;
 use tokio::time::{self, Duration};
 use tokio_tun::{Tun, TunBuilder};
+use std::sync::Arc;
 
 pub struct Node {
     pub id: u8,
@@ -57,8 +58,7 @@ impl PeerNode {
         }
     }
 
-    pub async fn heartbeat(turn: &(Ipv4Addr, u16), id: u8, localport :u16) {
-        let socket = UdpSocket::bind(format!("0.0.0.0:{}", localport)).await.expect("unbale to create socket");
+    pub async fn heartbeat(turn: &(Ipv4Addr, u16), id: u8, socket: Arc<UdpSocket>) {
         let mut interval = time::interval(Duration::from_secs(3));
         let (ip, port) = turn;
         socket
