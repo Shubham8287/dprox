@@ -1,3 +1,4 @@
+use clap::Parser;
 use log;
 use std::{net::Ipv4Addr, str::from_utf8, u16};
 use tokio::net::UdpSocket;
@@ -8,7 +9,7 @@ use rand::Rng;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use std::sync::Arc;
 
-async fn conn(turn_addr: String, port: u16) {
+async fn conn(turn_addr: &String, port: u16) {
     log::info!("Starting as peer node");
     
     log::info!("Setting Tun");
@@ -32,7 +33,7 @@ async fn conn(turn_addr: String, port: u16) {
 
     let mut buf1 = [0u8; 1500];
     let mut buf2 = [0u8; 1500];
-    let raddr = turn_addr + ":" + &port.to_string();
+    let raddr = turn_addr.to_owned() + ":" + &port.to_string();
     //_healthcheck_task.await.unwrap();
     loop {
         tokio::select! {
@@ -57,7 +58,7 @@ async fn conn(turn_addr: String, port: u16) {
 
 
 
-async fn serv(port: &u16) {
+async fn serv(port: u16) {
     log::info!("Starting as server node");
 
     log::info!("Setting tun");
@@ -112,7 +113,7 @@ async fn serv(port: &u16) {
     }
 }
 
-async fn get_info(turn_addr: String, port: u16) {
+async fn get_info(turn_addr: &String, port: u16) {
     log::info!("Fetching network details...");
     
     let socket = UdpSocket::bind("0.0.0.0:9090")
@@ -154,9 +155,10 @@ async fn get_info(turn_addr: String, port: u16) {
 #[tokio::main]
 async fn main() {
     env_logger::init();
-    match cli::get_args().unwrap() {
-        cli::Args::Client(client) => conn(client.remote_addr, client.port).await,
-        cli::Args::Server(server) => serv(&server.port).await,
-        cli::Args::Info(client) => get_info(client.remote_addr, client.port).await,
+    let args = cli::DproxArg::parse();
+    match &args.command {
+        cli::Role::Client(client) => conn(&client.remote_addr, client.port.unwrap()).await,
+        cli::Role::Server(server) => serv(server.port.unwrap()).await,
+        cli::Role::Info(client) => get_info(&client.remote_addr, client.port.unwrap()).await,
     }
 }
