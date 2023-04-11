@@ -13,8 +13,7 @@ async fn conn(turn_addr: &String, port: u16) {
     log::info!("Starting as peer node");
     
     log::info!("Setting Tun");
-    let octets: [u8; 4] = turn_addr.split('.').map(|x| x.parse().unwrap()).collect::<Vec<u8>>().try_into().unwrap();
-    let mut node = model::PeerNode::new(Ipv4Addr::new(octets[0], octets[1], octets[2], octets[3]), port);
+    let mut node = model::PeerNode::new(turn_addr.parse::<Ipv4Addr>().unwrap(), port);
     let turn = node.turn;
     let id = node.me.id;
     let tun = node.me.tun.as_mut();
@@ -23,7 +22,7 @@ async fn conn(turn_addr: &String, port: u16) {
     log::info!("setting socket");
     let mut rng = rand::thread_rng();
     let localport = rng.gen_range(8000..9000);
-    let socket = Arc::new(UdpSocket::bind(format!("0.0.0.0:{}", localport)).await.expect("unbale to create socket"));
+    let socket = Arc::new(UdpSocket::bind(("0.0.0.0", localport)).await.expect("unbale to create socket"));
     let cloned_socket = Arc::clone(&socket);
 
     log::info!("spawning healthcheck");
@@ -40,15 +39,15 @@ async fn conn(turn_addr: &String, port: u16) {
             (len, sock_addr) = async {
                 socket.recv_from(&mut buf2).await.expect("error receving from socket")
             } => {
-                    log::info!("source {:?} -> interface", &sock_addr);
-                    log::debug!("source {} -> interface: data {:?}", &sock_addr, &buf2[..len]);
+                    log::info!("source {:?} -> interface", sock_addr);
+                    log::debug!("source {} -> interface: data {:?}", sock_addr, &buf2[..len]);
                     writer.write(&mut buf2[0..len]).await.expect("error writting to interface");
             },
             len = async {
                 reader.read(&mut buf1).await.expect("error reading to interface")
             } => {
-                    log::info!("inteface -> address {} ", &raddr);
-                    log::debug!("inteface -> address {}: data {:?}", &raddr, &buf1[..len]);
+                    log::info!("inteface -> address {} ", raddr);
+                    log::debug!("inteface -> address {}: data {:?}", raddr, &buf1[..len]);
                     socket.send_to(&buf1[0..len], &raddr).await.expect("error sending to socket");
             }
         };
@@ -68,7 +67,7 @@ async fn serv(port: u16) {
     let (mut reader, mut writer) = tokio::io::split(tun);
 
     log::info!("Setting socket");
-    let socket = UdpSocket::bind(String::from("0.0.0.0:") + &port.to_string())
+    let socket = UdpSocket::bind(("0.0.0.0", port))
         .await
         .expect("unable to create socket");
     let mut buf1 = [0u8; 1500];
