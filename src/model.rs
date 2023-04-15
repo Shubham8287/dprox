@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use tokio::time::{self, Duration};
 use tokio_tun::{Tun, TunBuilder};
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
 pub struct Node {
     pub id: u8,
@@ -58,10 +59,11 @@ impl PeerNode {
         }
     }
 
-    pub async fn heartbeat(turn: &(Ipv4Addr, u16), id: u8, socket: Arc<UdpSocket>) {
+    pub async fn heartbeat(turn: &(Ipv4Addr, u16), id: u8, socket: Arc<Mutex<UdpSocket>>) {
         let mut interval = time::interval(Duration::from_secs(3));
         let (ip, port) = turn;
         socket
+            .lock().await
             .connect(format!("{}:{}", ip.to_string(), port))
             .await
             .expect("failed to connect to server");
@@ -69,7 +71,7 @@ impl PeerNode {
         buf[0] = 2;
         buf[1] = id;
         loop {
-            socket.send(&buf).await.expect("unable to send heartbeat");
+            socket.lock().await.send(&buf).await.expect("unable to send heartbeat");
             interval.tick().await;
         }
     }

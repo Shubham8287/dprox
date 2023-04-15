@@ -1,13 +1,13 @@
 use clap::Parser;
 use log;
-use std::{net::Ipv4Addr, str::from_utf8, u16};
+use std::{net::Ipv4Addr, sync::Arc, u16};
 use tokio::net::UdpSocket;
 mod cli;
 mod model;
 use env_logger;
 use rand::Rng;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use std::sync::Arc;
+use tokio::sync::Mutex;
 
 async fn conn(turn_addr: &String, port: u16) {
     log::info!("Starting as peer node");
@@ -22,7 +22,7 @@ async fn conn(turn_addr: &String, port: u16) {
     log::info!("setting socket");
     let mut rng = rand::thread_rng();
     let localport = rng.gen_range(8000..9000);
-    let socket = Arc::new(UdpSocket::bind(("0.0.0.0", localport)).await.expect("unbale to create socket"));
+    let socket = Arc::new(Mutex::new(UdpSocket::bind(("0.0.0.0", localport)).await.expect("unbale to create socket")));
     let cloned_socket = Arc::clone(&socket);
 
     log::info!("spawning healthcheck");
@@ -37,7 +37,7 @@ async fn conn(turn_addr: &String, port: u16) {
     loop {
         tokio::select! {
             (len, sock_addr) = async {
-                socket.recv_from(&mut buf2).await.expect("error receving from socket")
+                socket.lock().await.recv_from(&mut buf2).await.expect("error receving from socket")
             } => {
                     log::info!("source {:?} -> interface", sock_addr);
                     log::debug!("source {} -> interface: data {:?}", sock_addr, &buf2[..len]);
@@ -48,7 +48,7 @@ async fn conn(turn_addr: &String, port: u16) {
             } => {
                     log::info!("inteface -> address {} ", raddr);
                     log::debug!("inteface -> address {}: data {:?}", raddr, &buf1[..len]);
-                    socket.send_to(&buf1[0..len], &raddr).await.expect("error sending to socket");
+                    socket.lock().await.send_to(&buf1[0..len], &raddr).await.expect("error sending to socket");
             }
         };
     }
